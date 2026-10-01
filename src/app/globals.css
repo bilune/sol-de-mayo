@@ -1,0 +1,756 @@
+@import 'tailwindcss';
+
+:root {
+  /* Background sampled pixel by pixel. */
+  --paper: #f9f9f9;
+  /*
+   * Main color of the INTERFACE: a chosen midnight blue, not sampled. The
+   * bot's black has not moved: it lives in skins.ts (`ink`, #0a0a0c). The two must not be confused: changing this one retouches the
+   * set, changing the other breaks the likeness.
+   */
+  --ink: #17203a;
+  --line: #e3e5ea;
+  --muted: #6e7382;
+  /* Interface red for destructive actions — chosen, like --ink. */
+  --danger: #d63c34;
+
+  /*
+   * Argentine flag: the official sky blue (Decreto 1650/2010, Pantone 16-4132 TC,
+   * RGB 116 172 223) and white. The stage (`.flag`) wears the flag's three
+   * bands behind the sun; the side panel stays on paper.
+   */
+  --sky: #74acdf;
+  --white: #ffffff;
+  /* each sky-blue band's share of the height; the white one takes the rest */
+  --stripe: 25%;
+
+  /**
+   * Height of the montage bar. It is fixed at the bottom, so the scene reserves
+   * its room — in BOTH views, otherwise the centered avatar changes position when
+   * switching to customization.
+   */
+  --timeline: 236px;
+
+  /**
+   * Duration and curve of the transition from one view to the other: the scene's
+   * slide and the ball's growth. The gaze turn has its own duration (`TURN_TIME`
+   * in `src/ui/gaze.ts`), deliberately a bit longer — the eyes finish settling
+   * after the ball has finished growing, which makes both read as a single
+   * movement coming to an end. Ease-out without overshoot, like everything else
+   * in the project.
+   */
+  --swing: 1s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * The same bar, on a narrow window: 236 px is 29 % of a phone screen, and the
+ * height it takes is subtracted from everything that remains. 200 px leave the
+ * ruler (28 px) and 64 px cards, i.e. the thumbnail at its maximum size — below
+ * that the cards no longer show anything.
+ *
+ * The variable is read by the scene's reserve and by the avatar's cap, which
+ * apply at every width. The fine adjustments of `.export-bar` and of the
+ * columns are in the `>= 64rem` query: they never see this value.
+ */
+@media (width < 64rem) {
+  :root {
+    --timeline: 200px;
+  }
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+/*
+ * The settings ball deliberately exits on the right. Without this clipping, its
+ * overflow would become a scrollable area and the page would widen — including
+ * during the RETURN animation, where the ball comes back down while the view has
+ * already changed. Hence a permanent clip, and not only on that view.
+ *
+ * On `#app` and not on `body`: the body's `overflow` is PROPAGATED to the
+ * viewport when the root is `visible`, so setting it there clips nothing at all.
+ * `#app` is an ordinary container, it clips for real.
+ *
+ * `clip` and not `hidden`: `hidden` would make it a scroll container, and so
+ * make the overflow navigable instead of removing it. Here on the x axis only,
+ * because below 64rem the layout stacks and must scroll; on large screens a
+ * second rule also clips the height (see below).
+ */
+#app {
+  overflow-x: clip;
+  /* anchor for the big footer word, which is positioned against it with `absolute` */
+  position: relative;
+}
+
+/*
+ * Single-line truncation. Deliberately not `truncate` (text-overflow): that one
+ * cuts in the middle of a word and keeps the space before the ellipsis when the
+ * cut falls between two words. `line-clamp` cuts at the word and sticks the
+ * ellipsis to the text, which is the only readable way to write "My cycle…".
+ */
+@utility clamp-line {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+}
+
+/*
+ * Dialog opening. A transition on an element going from `display: none` to
+ * visible needs `@starting-style` to have a starting state, and
+ * `allow-discrete` so that `display` and `overlay` wait for the end of the
+ * animation on close. That is why it is not written as utility classes.
+ */
+.dialog,
+.dialog::backdrop {
+  opacity: 0;
+  transition:
+    opacity 0.18s ease-out,
+    transform 0.18s ease-out,
+    overlay 0.18s ease-out allow-discrete,
+    display 0.18s ease-out allow-discrete;
+}
+
+.dialog {
+  transform: translateY(8px) scale(0.98);
+}
+
+.dialog[open],
+.dialog[open]::backdrop {
+  opacity: 1;
+}
+
+.dialog[open] {
+  transform: none;
+}
+
+.dialog::backdrop {
+  background: rgb(10 12 20 / 0.4);
+}
+
+@starting-style {
+  .dialog[open],
+  .dialog[open]::backdrop {
+    opacity: 0;
+  }
+
+  .dialog[open] {
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+/*
+ * The project name in large type, at the foot of the settings. Taken from Yuzu's
+ * landing page (`yuzu-releases/index.html`), transposed to our colors.
+ *
+ * The fade is a COLOR GRADIENT revealed through the letters
+ * (`background-clip: text`), and not a `mask-image`: the text is never painted,
+ * it is the background we see through it. It already starts faint (22 %) and
+ * dies out completely at 88 % of the height, so the bottom of the letters is
+ * invisible even before being clipped.
+ *
+ * `line-height` below 1 makes the glyphs overflow their box: that is what gets
+ * them clipped by the panel and gives the impression that the word comes out of
+ * the page. Hence `pointer-events: none` — without it, the letters reaching
+ * upward steal clicks from the links above, a trap already hit on the landing
+ * page.
+ *
+ * `-webkit-text-fill-color` in addition to `color`: Safari does not render the
+ * text transparent with `color` alone. Tailwind has no utility for this property,
+ * hence this rule written by hand rather than as classes.
+ */
+.wordmark {
+  /*
+   * `absolute` within `#app`, and not `fixed`. `#app` is exactly the height of
+   * the window, so the bottom is the same — but a fixed element is TAKEN OUT of
+   * the document: it does not follow the elastic bounce when trying to scroll a
+   * page that does not scroll, whereas the word on Yuzu's landing page is in the
+   * flow and follows the gesture. With `absolute` it follows the page.
+   */
+  position: absolute;
+  /* clears the rail, which floats (`fixed left-4`) and reserves nothing in the scene */
+  left: 6rem;
+  /* slightly below the edge: that is what makes the screen bite into the letters */
+  bottom: -0.1em;
+  pointer-events: none;
+  user-select: none;
+  line-height: 0.78;
+  /*
+   * Sized from the space ACTUALLY available, and not in `vw` alone: the word
+   * starts 6rem from the left edge, so a size proportional to the window ended up
+   * pushing the last letter past the right edge. 6.03 is the width of « SOL DE MAYO »
+   * in ems at this weight and letter-spacing — measured in Chrome with the system
+   * stack, not estimated — and the rest is the margin left to it on the right. The
+   * 40px floor is what keeps the three words inside a 375px phone.
+   */
+  font-size: clamp(40px, calc((100vw - 7rem) / 6.03), 268px);
+  font-weight: 900;
+  letter-spacing: -0.045em;
+  /*
+   * Right margin INSIDE the box, and not spacing around it.
+   *
+   * `background-clip: text` paints the gradient on the element's box and reveals
+   * it through the letters: any glyph that overflows this box therefore has no
+   * gradient to show, and `-webkit-text-fill-color: transparent` makes it purely
+   * invisible. Yet the negative letter-spacing also subtracts 0.045 em after the
+   * LAST glyph, and the right bowl of an O already exceeds its advance: the final
+   * letter was cut clean, whatever the window width. It is the padding that widens the
+   * gradient's box, not the text size.
+   */
+  padding-right: 0.1em;
+  background: linear-gradient(
+    180deg,
+    rgb(23 32 58 / 0.22) 0%,
+    rgb(23 32 58 / 0.1) 48%,
+    rgb(23 32 58 / 0) 88%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  /* it arrives with the panel, not before: same delay as `.panel--open` */
+  opacity: 1;
+  transition: opacity 0.35s ease-out 0.2s;
+}
+
+@starting-style {
+  .wordmark {
+    opacity: 0;
+  }
+}
+
+/*
+ * The word below 64rem: IN THE FLOW, at the bottom of the page and centered.
+ *
+ * The out-of-flow positioning only holds as long as `#app` is exactly the height
+ * of the window, which is true above 64rem — nothing scrolls there. Below, the
+ * page really scrolls, and the word stayed 812 px from the top of the DOCUMENT:
+ * over the settings at rest (measured at 375 px: panel down to 780, word from
+ * 753), then right in the middle of the screen once the page was scrolled.
+ * Putting it back in the flow gives it back to the page: it comes after the
+ * scene, hence last, and nothing can pass over it anymore since there is no
+ * overlap left.
+ *
+ * Centered and not left-aligned: the 6rem margin cleared the rail, which becomes
+ * a TOP band at this width. There is nothing left to avoid, and a full-width word
+ * set under a centered column reads askew if it is not centered. The 0.1em right
+ * margin goes away with the positioning: centering leaves slack on both sides, so
+ * the last letter no longer has an edge to be cut at.
+ *
+ * The cap drops to 200 px: on a tablet window, 268 px of decoration ate a quarter
+ * of the page. And the divisor loses the 6rem left margin, which no longer exists
+ * here — the word takes the full width minus the scene's gutters.
+ */
+@media (width < 64rem) {
+  .wordmark {
+    position: static;
+    text-align: center;
+    padding-right: 0;
+    font-size: clamp(40px, calc((100vw - 2.5rem) / 6.03), 200px);
+    /*
+     * The letters touch the bottom edge of the page.
+     *
+     * A negative margin is not enough: the scrollable area is the union of the
+     * descendants' BOXES, margins do not count, and the font's heel — the
+     * descender space, empty for SOL DE MAYO which has none — exceeded the box by
+     * 21 px that the page still counted. Hence 21 px of white under the word.
+     *
+     * So we clip at the BASELINE: nothing overflows anymore, the page stops where
+     * the letters stop. That is what the `#app` clip does above 64rem, where the
+     * word is simply placed under the edge.
+     */
+    height: 0.69em;
+    overflow: hidden;
+    /*
+     * The gradient is painted on the BOX and revealed through the letters:
+     * clipping the box would have faded it out higher up (it reaches zero at 88 %
+     * of its height). So we give it back the full box height, independently of
+     * the clipping.
+     */
+    background-size: 100% 0.78em;
+  }
+}
+
+/*
+ * Moving the avatar from one view to the other.
+ *
+ * The scene is a three-column grid: left panel, avatar, right panel. Only one of
+ * the two panel columns has a width at a time, and it is the INTERPOLATION OF
+ * THESE WIDTHS that moves the avatar — grid tracks animate, whereas `order` and
+ * `flex-direction` do not. Hence this grid rather than reversing the container's
+ * direction, and hence it being written here: both states must be literal values
+ * for the transition to have something to interpolate.
+ *
+ * The gutters stay constant in both states: the avatar column therefore keeps
+ * exactly the same width, and its center shifts by the width of a panel, no more
+ * and no less.
+ *
+ * Below 64rem the grid does not exist: everything stacks, and there is no longer
+ * any slide to animate.
+ */
+
+/*
+ * The avatar's TRANSITION is declared here, outside the width query, whereas its
+ * positions are inside it. Two reasons: the arrival on the site makes the ball
+ * appear at every size, and a transition redeclared further down would drop the
+ * opacity from it — a property missing from the list no longer transitions at
+ * all.
+ *
+ * Opacity takes its time (0.8 s): it is a ball appearing, not an element loading.
+ * It stays shorter than the switch so that the ball is fully opaque before it has
+ * finished settling — the reverse would give a fade lingering on an already
+ * still shape.
+ */
+.avatar {
+  transition:
+    transform var(--swing),
+    opacity 0.8s ease-out;
+}
+
+/*
+ * Arrival of the export bar: it rises while revealing itself, AFTER the avatar
+ * has taken its place.
+ *
+ * It is a TRANSITION and not an animation, exactly like `.panel` — and that is
+ * what keeps it quiet when needed. A transition does not play on an element's
+ * first computed style: on reload, or when coming back from the Animations view,
+ * the bar is born already visible and nothing moves. An animation, on the other
+ * hand, replayed on every mount, hence on every view change.
+ *
+ * That is also why the bar is mounted DURING the arrival, just hidden: without a
+ * starting state present on screen, there would be nothing to interpolate.
+ *
+ * The DELAY is not here but in `App.tsx` (`ARRIVAL_DELAY`), and it ONLY serves
+ * the end of the arrival: the time for the avatar to reach its place. Coming from
+ * another view there is nothing to wait for, since the bar is positioned on the
+ * window and is born already in place. In CSS a single value would have been
+ * needed for both cases, hence wrong in one of the two.
+ *
+ * `transform` and not `translate` carries the rise: horizontal centering already
+ * uses `translate`, and the two properties compose instead of overwriting each
+ * other.
+ */
+.export-bar {
+  transition:
+    opacity 0.6s ease-out,
+    transform 0.6s ease-out;
+}
+
+.export-bar--hidden {
+  opacity: 0;
+  transform: translateY(0.85rem);
+}
+
+@media (width >= 64rem) {
+  /*
+   * On large screens the layout is fitted to the window: nothing must scroll the
+   * PAGE. The only vertical overflow comes from the giant ball, whose box grows
+   * with it (2.5 times 460 px) while only the ball is painted — emptiness that
+   * lengthened the page by two hundred pixels.
+   *
+   * `clip` on both axes here, and not `hidden`: `hidden` would make `#app` a
+   * scroll container, and so make this overflow navigable instead of removing
+   * it. Below 64rem the rule does not apply — the layout stacks there and must
+   * really scroll.
+   */
+  #app {
+    overflow: clip;
+  }
+
+  .scene {
+    display: grid;
+    grid-template-columns: 0 minmax(0, 1fr) 20rem;
+    /* no gutter: the flag runs edge to edge up to the side panel */
+    column-gap: 0;
+    transition: grid-template-columns var(--swing);
+    /*
+     * Bounded to the window. That is what gives the panels a CONSTRAINED height,
+     * without which their `overflow-y: auto` is useless: a grid track with no cap
+     * takes the height of its content, the box never overflows itself, and the
+     * panel ended up cut by the `#app` clip without being able to scroll. On a
+     * short window, the panel is what scrolls.
+     */
+    max-height: 100%;
+    /*
+     * A single DEFINED track, not an automatic one. An automatic track takes the
+     * height of its content and ignores the container's cap: the panel kept its
+     * 773 px in a 620 window, got clipped by `#app` and had nothing to scroll
+     * since its box did not overflow itself.
+     */
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .scene--left {
+    grid-template-columns: 20rem minmax(0, 1fr) 0;
+  }
+
+  /*
+   * The ball ALONE on stage: no panel column. Two cases, and it had to be the
+   * same rule —
+   *
+   * - the arrival on the site, where it is the RETURN to `.scene` (the right
+   *   column taking back its 20rem) that slides the ball into its place;
+   * - the preview, where the panels are unmounted. Without this class the grid
+   *   still reserves their track — a 20rem column plus its gutter — and the
+   *   avatar ends up centered in an offset column, hence 180 px left of the
+   *   screen's center. Unmounting a panel does not remove its track.
+   *
+   * Both gutters remain and are equal, so the middle column stays centered to
+   * the pixel.
+   */
+  .scene--alone {
+    grid-template-columns: 0 minmax(0, 1fr) 0;
+  }
+
+  /*
+   * The ball in the settings: it grows until it exits the screen on the right,
+   * and moves down enough to clear the top of the page: without that air above
+   * it, the view reads as a truncated image rather than as a framing.
+   *
+   * A `transform` and not the SVG size: the layout does not move, so nothing is
+   * re-laid out on every frame, and since the path stays vector it stays sharp at
+   * any scale.
+   *
+   * Here, ONLY size and position. The spin on itself is not a CSS mirror: it is
+   * played by the gaze, the eyes actually going around the sphere
+   * (`src/ui/gaze.ts`). Flipping the image with a negative scale would have laid
+   * the eyes down as `//` instead of `\\` and flattened the ball as it passed
+   * through zero — two things the project refuses.
+   *
+   * Both states declare the same list of functions, otherwise the browser has
+   * nothing to interpolate and the change would happen all at once.
+   */
+  .avatar {
+    transform: translate(0, 0) scale(1);
+  }
+
+  .avatar--giant {
+    transform: translate(30vw, 14vh) scale(2.5);
+  }
+
+  .scene__left {
+    grid-column: 1;
+  }
+
+  .scene__avatar {
+    grid-column: 2;
+  }
+
+  .scene__right {
+    grid-column: 3;
+  }
+
+  /*
+   * A panel in a zero-width column must disappear without widening its track:
+   * `min-width: 0` prevents it from claiming its content's width, and the clip
+   * cuts what overflows during the slide.
+   */
+  .panel {
+    min-width: 0;
+    /*
+     * `hidden` horizontally so that the closing column squashes its content,
+     * `auto` vertically so that the PANEL scrolls and not the page: the
+     * customizer's thumbnail grid is taller than a short window, and the page no
+     * longer scrolls (see `#app` above).
+     */
+    overflow-x: hidden;
+    overflow-y: auto;
+    opacity: 0;
+    transition: opacity 0.3s ease-out;
+  }
+
+  .panel--open {
+    opacity: 1;
+    /* the content only appears once the room is made, otherwise it is read while
+       still squashed */
+    transition: opacity 0.35s ease-out 0.2s;
+  }
+
+  /*
+   * Export bar: aligned to the bottom of the avatar's BOX, not to the bottom of
+   * the column.
+   *
+   * The box is square and centered in the column, but the silhouette only takes
+   * about 65 % of its side — the bot's viewBox keeps room for the rings of the
+   * animated states, which do not exist at rest. Aiming at the bottom of the
+   * column therefore left a measured 176 px of emptiness between the ball and the
+   * button, and the bar read as detached from the avatar.
+   *
+   * The `min()` is exactly the one from `.avatar`'s `max-w`: it is the same box,
+   * so the bar follows its shrinking on a short window instead of running over it.
+   *
+   * Nothing is reserved here: `--timeline` is already subtracted from the
+   * column's height in both views, so the bottom band is free and the avatar does
+   * not move a pixel.
+   */
+  /*
+   * Positioned like the MONTAGE bar, and not in the avatar's column.
+   *
+   * That is what keeps it from moving. Anchored in the column, it followed the
+   * grid's interpolation: coming from the settings, the left panel closes and the
+   * column's center shifts by 320 px — so the bar slid to its place instead of
+   * being there. The montage bar, for its part, never moves because it is
+   * positioned on the WINDOW.
+   *
+   * `left`/`right` are exactly its own: the band covers the avatar's column
+   * (4.5rem = margin + gutter; 24.5rem = panel + gutter + margin) and centers its
+   * content. The Personnaliser view has only one grid layout, so this position is
+   * constant.
+   */
+  .export-bar {
+    position: fixed;
+    left: 4.5rem;
+    right: 24.5rem;
+    display: flex;
+    justify-content: center;
+    /*
+     * Just below the avatar's box: top of the band + half-band (the center of the
+     * box, which is centered in it) + half-box. The `min()` is the one from
+     * `.avatar`'s `max-w`, so the bar follows its shrinking on a short window. The
+     * final half-rem makes it bite into the dead margin at the bottom of the box,
+     * where the silhouette does not go.
+     */
+    top: calc(
+      2rem + (100dvh - 3rem - var(--timeline)) / 2 +
+        min(460px, 100dvh - var(--timeline) - 7rem) / 2 - 0.5rem
+    );
+  }
+}
+
+/*
+ * Arrival on the site: the Sol de Mayo on the first chords of the anthem (see
+ * `SUNRISE` in `src/ui/intro.ts`). After the visitor's tap, a giant sun rises
+ * from below the bottom edge, half of it, like the Teletubbies' sun over the
+ * hill, its rays reaching up to the top of the screen; on the third chord it
+ * recedes into the distance to its place in the middle; a golden glow swells behind it on each
+ * chord, and the flag's sky-blue bands come in as it settles (`.stripe-intro`).
+ * The stage is white until then.
+ *
+ * The chords land at 0.08 s, 1.33 s and 2.6 s: the keyframe percentages below are
+ * those times over each animation's duration. Change one, change both.
+ *
+ * Position and uniform scale only: the sun never deforms. It faces you the whole
+ * way (`sunriseLook`), so its 3D corona never tilts back.
+ *
+ * Written AFTER the width query, and not inside it: the `transform` must take
+ * precedence over the one `.avatar` declares there.
+ */
+.avatar--waiting {
+  /* hidden, not transparent: an opacity would fade in once the sun starts */
+  visibility: hidden;
+  transform: translate(0, calc(50dvh + 48% * var(--s, 3.5))) scale(var(--s, 3.5));
+}
+
+.avatar--intro {
+  /* the glow (::before) is laid out against the sun's own box */
+  position: relative;
+  animation: sun-rise 4s both;
+}
+
+/*
+ * chords at 0.08 s, 1.33 s, 2.6 s of 4 s: 2 %, 33 %, 65 %.
+ *
+ * `--s` (set by App) is the giant sun's scale. `translate` comes first, so it is
+ * NOT scaled: `50dvh` puts the sun's centre on the bottom edge of the screen,
+ * `48% * --s` more (the corona reaches 0.47 of the box) hides it entirely below
+ * it, and `10% * --s` less lifts it just enough for its eyes to show.
+ */
+@keyframes sun-rise {
+  0% {
+    /* entirely below the screen */
+    transform: translate(0, calc(50dvh + 48% * var(--s, 3.5))) scale(var(--s, 3.5));
+    animation-timing-function: cubic-bezier(0.25, 0.55, 0.3, 1);
+  }
+  58% {
+    /* risen by half, like the sun over the hill: its eyes just above the edge */
+    transform: translate(0, calc(50dvh - 10% * var(--s, 3.5))) scale(var(--s, 3.5));
+    animation-timing-function: ease-in-out;
+  }
+  66% {
+    transform: translate(0, calc(50dvh - 10% * var(--s, 3.5))) scale(var(--s, 3.5));
+    animation-timing-function: cubic-bezier(0.5, 0, 0.2, 1);
+  }
+  100% {
+    /* then off into the distance, to its place in the middle */
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+/* The flag's sky-blue bands, coming in from the edges as the sun settles. */
+.stripe-intro {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--stripe);
+  background: var(--sky);
+  pointer-events: none;
+  animation: stripe-enter 1s cubic-bezier(0.2, 0.8, 0.2, 1) 3.1s both;
+}
+
+.stripe-intro--top {
+  top: 0;
+  transform-origin: top;
+}
+
+.stripe-intro--bottom {
+  bottom: 0;
+  transform-origin: bottom;
+}
+
+@keyframes stripe-enter {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+/* The glow behind the sun: it moves with it, swells on each chord, then fades. */
+.avatar--intro::before {
+  content: '';
+  position: absolute;
+  inset: -25%;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgb(255 222 140 / 0.9) 0%,
+    rgb(252 191 73 / 0.45) 28%,
+    rgb(252 191 73 / 0) 62%
+  );
+  animation: glow 4.6s ease-out both;
+}
+
+/* chords at 0.08 s, 1.33 s, 2.6 s of 4.6 s: 2 %, 29 %, 57 % */
+@keyframes glow {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  2% {
+    opacity: 0.2;
+    transform: scale(0.55);
+  }
+  12% {
+    opacity: 0.55;
+    transform: scale(0.75);
+  }
+  29% {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
+  38% {
+    opacity: 0.75;
+    transform: scale(0.95);
+  }
+  57% {
+    opacity: 0.65;
+    transform: scale(1);
+  }
+  66% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+}
+
+/* The button that lets the sun rise, in the middle of the empty flag. */
+.sunrise-button {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 20;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.85rem 1.6rem;
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgb(23 32 58 / 0.18);
+  cursor: pointer;
+  transition:
+    transform 0.2s ease-out,
+    box-shadow 0.2s ease-out;
+}
+
+.sunrise-button:hover {
+  transform: translate(-50%, -50%) scale(1.04);
+  box-shadow: 0 14px 36px rgb(23 32 58 / 0.24);
+}
+
+.sunrise-button:focus-visible {
+  outline: 3px solid var(--sky);
+  outline-offset: 3px;
+}
+
+/*
+ * The sidebar during the arrival. It stays mounted — it is `fixed`, unmounting
+ * it would free no room — but `inert`, which takes it out of the tab order as
+ * well as out of clicks. The attribute therefore serves as the selector: a single
+ * source of truth for "absent", instead of one more class to keep in sync. It
+ * comes back with the same delay as `.panel--open`, so that the whole set
+ * settles in a single movement.
+ */
+.rail {
+  transition: opacity 0.35s ease-out 0.2s;
+}
+
+.rail[inert] {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene,
+  .panel,
+  .panel--open,
+  .avatar {
+    transition: none;
+  }
+
+  .export-bar {
+    transition: none;
+  }
+
+  /*
+   * Modal dialogs were missing from this list: `.dialog` animates a
+   * `translateY(8px) scale(0.98)`, so they still slid under "reduced motion"
+   * while everything else was neutralized. `.rail` and `.wordmark` only play on
+   * opacity and have no business here.
+   */
+  .dialog,
+  .dialog::backdrop {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* The flag's three bands, on the stage the sun is centred in. */
+.flag {
+  background: linear-gradient(
+    to bottom,
+    var(--sky) 0 var(--stripe),
+    var(--white) var(--stripe) calc(100% - var(--stripe)),
+    var(--sky) calc(100% - var(--stripe))
+  );
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
